@@ -1,64 +1,26 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Virtualenvs
+# Virtual environments (NEVER push these)
 venv/
+.env/
 .venv/
-env/
-ENV/
 
-# Jupyter
+# Jupyter checkpoints
 .ipynb_checkpoints/
 
-# Big local projects to ignore
-DeepMVI/
-deepMVI/
-imputegap/
-
-# Data & model artifacts
-data/
-datasets/
-raw_data/
-processed_data/
-models/
-checkpoints/
-outputs/
-results/
-
-# ML binary files
-*.pt
-*.pth
-*.ckpt
-*.h5
-*.npy
-*.npz
-*.onnx
-
-# Archives
-*.zip
-*.tar
-*.tar.gz
-*.tgz
-*.gz
-
-# Compiled libs
-*.so
-*.dll
-*.dylib
-
-# Logs / runs / experiments
+# Logs
 logs/
-runs/
 wandb/
+runs/
 
-# IDE / OS
-.vscode/
-.idea/
+# System files
 .DS_Store
 Thumbs.db
 
-# build
-build/
-dist/
-*.egg-info/
+# IDE folders
+.vscode/
+.idea/
