@@ -1,0 +1,10 @@
+Original imputed path: /home/deeps/deepmvi-seminar/output_deepmvi/airq/imputed.npy
+Original imputed sha1: 31a8d2c117e56cb56ef7382d396c9c5f3ce19919
+Imported standard wrapper: DeepMVI_Imputer
+Imported non-destructive wrapper: DeepMVI_Imputer_ND
+Standard wrapper not available; skipping
+Non-destructive wrapper not available; skipping
+After wrapper, imputed sha1: 31a8d2c117e56cb56ef7382d396c9c5f3ce19919
+original imputed.npy unchanged
+\nSUMMARY:
+\nWrapper test: SUCCESS

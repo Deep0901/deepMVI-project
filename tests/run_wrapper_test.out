@@ -1,0 +1,10 @@
+Original imputed path: /home/deeps/deepmvi-seminar/output_deepmvi/electricity/imputed.npy
+Original imputed sha1: 1115af4efa05f747cce27ecb73947fe1af05458f
+Failed to import standard wrapper: No module named 'imputegap'
+Non-destructive wrapper import failed (this is OK if you did not create it): No module named 'imputegap'
+Standard wrapper not available; skipping
+Non-destructive wrapper not available; skipping
+After wrapper, imputed sha1: 1115af4efa05f747cce27ecb73947fe1af05458f
+original imputed.npy unchanged
+\nSUMMARY:
+\nWrapper test: SUCCESS

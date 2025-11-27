@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""
+baseline_comparison.py
+
+Runs baseline imputation methods (Mean, Forward-fill+Backward-fill,
+Linear Interpolation, and KNN) and compares them with DeepMVI on a
+given dataset.
+
+Usage examples (from project root):
+  source venv/bin/activate
+  python3 scripts/baseline_comparison.py --dataset electricity
+  python3 scripts/baseline_comparison.py --dataset airq --frac-missing 0.05
+
+Expected data layout:
+  data/<dataset>/X.npy  (original full data matrix, float, shape [T, D])
+  data/<dataset>/A.npy  (optional availability mask: 1=observed, 0=missing)
+
+Outputs:
+  baseline_results/<dataset>/
+    X_observed.npy         # data used as input to baselines (with NaNs)
+    X_true.npy             # ground truth full dataset
+    eval_mask.npy          # 1 where we evaluate error (missing positions)
+    mean_imputed.npy
+    ffill_imputed.npy
+    linear_imputed.npy
+    knn_<k>_imputed.npy
+    deepmvi_imputed.npy    # if DeepMVI result exists
+    metrics.csv            # MAE & RMSE per method
+    mae_bar.png            # bar chart for slides
+    README.txt             # short description
+"""
+
+import os
+import argparse
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.impute import KNNImputer
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+PAPER_PATH = "/mnt/data/Research Paper DS.pdf"  # just for reference in README
+
+
+# --------- Baseline methods --------- #
+
+def mean_impute(X_obs: np.ndarray) -> np.ndarray:
+    """Column-wise mean imputation."""
+    X = X_obs.copy().astype(float)
+    col_means = np.nanmean(X, axis=0)
+    inds = np.where(np.isnan(X))
+    X[inds] = np.take(col_means, inds[1])
+    return X
+
+
+def fill_ffill_bfill(X_obs: np.ndarray) -> np.ndarray:
+    """Forward-fill then backward-fill per column."""
+    import pandas as pd
+    X = X_obs.copy().astype(float)
+    for c in range(X.shape[1]):
+        s = pd.Series(X[:, c])
+        s = s.ffill().bfill()
+        X[:, c] = s.values
+    return X
+
+
+def linear_interpolate(X_obs: np.ndarray) -> np.ndarray:
+    """Linear interpolation along time; fallback to column mean."""
+    import pandas as pd
+    X = X_obs.copy().astype(float)
+    for c in range(X.shape[1]):
+        s = pd.Series(X[:, c])
+        s = s.interpolate(method="linear", limit_direction="both")
+        if s.isna().any():
+            s = s.fillna(s.mean())
+        X[:, c] = s.values
+    return X
+
+
+def knn_impute(X_obs: np.ndarray, n_neighbors: int = 5) -> np.ndarray:
+    """KNN-based imputation."""
+    imputer = KNNImputer(n_neighbors=n_neighbors)
+    return imputer.fit_transform(X_obs)
+
+
+# --------- Evaluation --------- #
+
+def evaluate_imputation(X_true: np.ndarray,
+                        X_imp: np.ndarray,
+                        eval_mask: np.ndarray) -> tuple[float, float]:
+    """
+    Evaluate MAE and RMSE on positions where eval_mask == True.
+    """
+    ev = eval_mask.astype(bool)
+    y_true = X_true[ev]
+    y_imp = X_imp[ev]
+    mae = float(mean_absolute_error(y_true, y_imp))
+    rmse = float(np.sqrt(mean_squared_error(y_true, y_imp)))
+    return mae, rmse
+
+
+# --------- Main --------- #
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset", required=True,
+        help="dataset folder under data/ (e.g. electricity, airq)"
+    )
+    parser.add_argument(
+        "--outdir", default="baseline_results",
+        help="base output folder name (default: baseline_results)"
+    )
+    parser.add_argument(
+        "--frac-missing", type=float, default=0.05,
+        help="if dataset has no NaNs, fraction of entries to drop for evaluation"
+    )
+    parser.add_argument(
+        "--knn-n", type=int, default=5,
+        help="n_neighbors for KNNImputer (default: 5)"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=0,
+        help="random seed for synthetic missing mask"
+    )
+    args = parser.parse_args()
+
+    # Resolve paths
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    data_x = os.path.join(root, "data", args.dataset, "X.npy")
+    data_a = os.path.join(root, "data", args.dataset, "A.npy")  # optional
+
+    if not os.path.exists(data_x):
+        raise SystemExit(f"ERROR: data file not found at {data_x}")
+
+    X_true = np.load(data_x).astype(float)
+
+    # Load availability mask if present
+    if os.path.exists(data_a):
+        A = np.load(data_a)
+        orig_missing_mask = (A == 0)
+        print("Loaded availability mask from", data_a)
+    else:
+        orig_missing_mask = np.isnan(X_true)
+        print("No availability mask found; using NaNs in X.npy as missing mask.")
+
+    rng = np.random.default_rng(args.seed)
+
+    if orig_missing_mask.sum() == 0:
+        print("No original missing values detected.")
+        print(f"Creating synthetic missing mask with fraction={args.frac_missing:.3f}")
+        mask = rng.random(X_true.shape) < args.frac_missing
+        X_obs = X_true.copy()
+        X_obs[mask] = np.nan
+        eval_mask = mask
+    else:
+        print("Original missing values detected; using these for evaluation.")
+        X_obs = X_true.copy()
+        eval_mask = orig_missing_mask
+
+    # Prepare output directory
+    out_base = os.path.join(root, args.outdir, args.dataset)
+    os.makedirs(out_base, exist_ok=True)
+
+    # Save ground truth and evaluation mask for reproducibility
+    np.save(os.path.join(out_base, "X_observed.npy"), X_obs)
+    np.save(os.path.join(out_base, "X_true.npy"), X_true)
+    np.save(os.path.join(out_base, "eval_mask.npy"), eval_mask.astype(int))
+
+    print("Running baselines on dataset:", args.dataset)
+    results: list[tuple[str, float, float]] = []
+
+    # 1) Mean imputation
+    print(" - Mean imputation")
+    X_mean = mean_impute(X_obs)
+    np.save(os.path.join(out_base, "mean_imputed.npy"), X_mean)
+    mae, rmse = evaluate_imputation(X_true, X_mean, eval_mask)
+    results.append(("Mean", mae, rmse))
+
+    # 2) Forward/backward fill
+    print(" - Forward/Backward fill")
+    X_ff = fill_ffill_bfill(X_obs)
+    np.save(os.path.join(out_base, "ffill_imputed.npy"), X_ff)
+    mae, rmse = evaluate_imputation(X_true, X_ff, eval_mask)
+    results.append(("FFill-BFill", mae, rmse))
+
+    # 3) Linear interpolation
+    print(" - Linear interpolation")
+    X_lin = linear_interpolate(X_obs)
+    np.save(os.path.join(out_base, "linear_imputed.npy"), X_lin)
+    mae, rmse = evaluate_imputation(X_true, X_lin, eval_mask)
+    results.append(("Linear", mae, rmse))
+
+    # 4) KNN imputer
+    print(f" - KNN imputer (n={args.knn_n})")
+    X_knn = knn_impute(X_obs, n_neighbors=args.knn_n)
+    np.save(os.path.join(out_base, f"knn_{args.knn_n}_imputed.npy"), X_knn)
+    mae, rmse = evaluate_imputation(X_true, X_knn, eval_mask)
+    results.append((f"KNN_{args.knn_n}", mae, rmse))
+
+    # 5) DeepMVI comparison, if available
+    deepmvi_path = os.path.join(root, "output_deepmvi", args.dataset, "imputed.npy")
+    if os.path.exists(deepmvi_path):
+        print(" - DeepMVI (using existing imputed.npy)")
+        X_dm = np.load(deepmvi_path)
+        np.save(os.path.join(out_base, "deepmvi_imputed.npy"), X_dm)
+        mae, rmse = evaluate_imputation(X_true, X_dm, eval_mask)
+        results.append(("DeepMVI", mae, rmse))
+    else:
+        print(" - No DeepMVI result found at", deepmvi_path)
+
+    # Save metrics CSV
+    df = pd.DataFrame(results, columns=["method", "MAE", "RMSE"])
+    csv_path = os.path.join(out_base, "metrics.csv")
+    df.to_csv(csv_path, index=False)
+    print("Saved metrics to", csv_path)
+
+    # Plot MAE bar chart
+    plt.figure(figsize=(6, 4))
+    plt.bar(df["method"], df["MAE"])
+    plt.ylabel("MAE")
+    plt.title(f"Baseline MAE comparison ({args.dataset})")
+    plt.tight_layout()
+    fig_path = os.path.join(out_base, "mae_bar.png")
+    plt.savefig(fig_path)
+    plt.close()
+    print("Saved MAE bar plot to", fig_path)
+
+    # Write small README
+    readme = f"""
+Baseline comparison for dataset: {args.dataset}
+
+Files in this folder:
+ - X_observed.npy  (dataset with NaNs used as input to baselines)
+ - X_true.npy      (original full data)
+ - eval_mask.npy   (1 = evaluated positions)
+ - *_imputed.npy   (imputed arrays for each baseline)
+ - metrics.csv     (MAE and RMSE per method)
+ - mae_bar.png     (MAE bar chart for slides)
+
+If present:
+ - deepmvi_imputed.npy is the DeepMVI output used for comparison.
+
+Reference research paper:
+{PAPER_PATH}
+"""
+    with open(os.path.join(out_base, "README.txt"), "w") as f:
+        f.write(readme.strip() + "\n")
+
+    print("Baseline results saved to", out_base)
+    print("Done.")
+
+if __name__ == "__main__":
+    main()
